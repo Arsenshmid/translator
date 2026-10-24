@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LinguaCards — умные флеш-карточки для английского</title>
-<meta name="description" content="Тренажёр английских слов: флеш-карточки с автопереводом, самопроверкой и умным повторением сложных слов.">
+<title>Арсенов переводчик — карточки слов EN · DE · FR → RU</title>
+<meta name="description" content="Арсенов переводчик: флеш-карточки для английского, немецкого и французского с автопереводом, самопроверкой и облачной синхронизацией прогресса между устройствами.">
+<meta name="theme-color" content="#07070f">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='24' height='24' rx='6' fill='url(%23g)'/%3E%3Crect x='6' y='7' width='12' height='9' rx='2' fill='none' stroke='white' stroke-width='1.6'/%3E%3Cpath d='M9 19h9a2 2 0 0 0 2-2v-7' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' opacity='.65'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -213,6 +214,31 @@ kbd{font:600 10.5px 'Inter',sans-serif;background:rgba(255,255,255,.1);border:1p
 .float-pts.neg{color:#fb7185;text-shadow:0 0 26px rgba(251,113,133,.6)}
 @keyframes floatUp{0%{opacity:0;transform:translate(-50%,-80%)}18%{opacity:1}100%{opacity:0;transform:translate(-50%,-270%)}}
 
+/* ==== auth overlay ==== */
+.auth-wrap{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;padding:20px;background:radial-gradient(1200px 700px at 50% -10%,rgba(139,92,246,.16),transparent 60%),var(--bg)}
+.auth-card{width:min(400px,94vw);background:rgba(15,15,28,.88);border:1px solid rgba(255,255,255,.11);border-radius:24px;padding:34px 30px 26px;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);box-shadow:0 30px 90px -30px rgba(0,0,0,.85);text-align:center;animation:authIn .5s cubic-bezier(.2,.9,.3,1.15)}
+@keyframes authIn{from{opacity:0;transform:translateY(18px) scale(.97)}}
+.auth-mark{width:58px;height:58px;margin:0 auto 16px;border-radius:17px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8b5cf6,#22d3ee);color:#fff;box-shadow:0 14px 34px -10px rgba(139,92,246,.55)}
+.auth-mark svg{width:28px;height:28px}
+.auth-card h1{font:700 22px 'Unbounded',sans-serif;letter-spacing:.2px}
+.auth-sub{color:var(--muted);font-size:13px;line-height:1.6;margin:10px 0 22px}
+.auth-card label{display:block;text-align:left;font:600 11.5px 'Inter',sans-serif;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
+.auth-card input{display:block;width:100%;margin-top:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:12px 14px;font:500 15px 'Inter',sans-serif;color:var(--text);outline:0;transition:.2s}
+.auth-card input:focus{border-color:rgba(139,92,246,.65);box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+.auth-err{min-height:18px;color:#fb7185;font-size:12.5px;text-align:left;margin:2px 2px 8px}
+.auth-btn{width:100%;height:50px;border:0;border-radius:14px;cursor:pointer;font:700 15px 'Inter',sans-serif;color:#fff;background:linear-gradient(135deg,#8b5cf6,#6d28d9);box-shadow:0 14px 34px -12px rgba(139,92,246,.65);transition:.2s}
+.auth-btn:hover{filter:brightness(1.12)}
+.auth-hint{color:#565c72;font-size:11.5px;line-height:1.6;margin-top:16px}
+.shake{animation:shake .4s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
+/* ==== sync status ==== */
+.sync-chip{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--panel-border);border-radius:999px;padding:8px 14px;font-size:12.5px;color:var(--muted);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);cursor:help}
+.sync-dot{width:9px;height:9px;border-radius:50%;background:#64748b;display:inline-block;transition:.25s;box-shadow:0 0 0 3px rgba(100,116,139,.15);flex:0 0 auto}
+.sync-dot.ok{background:var(--green);box-shadow:0 0 0 3px rgba(16,185,129,.18)}
+.sync-dot.busy{background:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.18);animation:pulse 1s infinite}
+.sync-dot.err{background:var(--red);box-shadow:0 0 0 3px rgba(251,113,133,.2)}
+@keyframes pulse{50%{opacity:.3}}
+
 /* ==== responsive ==== */
 @media(max-width:660px){
   .add-grid{grid-template-columns:1fr;grid-template-areas:"src" "dir" "tr" "btn"}
@@ -238,18 +264,31 @@ kbd{font:600 10.5px 'Inter',sans-serif;background:rgba(255,255,255,.1);border:1p
 <body>
 <div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
 <div class="noise"></div>
+<div class="auth-wrap" id="authOverlay" style="display:none">
+  <form class="auth-card" id="authForm" novalidate>
+    <div class="auth-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="12" height="13" rx="2.5"/><path d="M8.5 4.5h8a3.5 3.5 0 0 1 3.5 3.5v9.5"/></svg></div>
+    <h1>Арсенов переводчик</h1>
+    <p class="auth-sub">Вход в личное облако: слова и прогресс будут одинаковыми на телефоне, компьютере и любом другом устройстве.</p>
+    <label>Логин<input id="authLogin" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+    <label>Пароль<input id="authPass" type="password" autocomplete="current-password"></label>
+    <div class="auth-err" id="authErr"></div>
+    <button class="auth-btn" type="submit">Войти</button>
+    <p class="auth-hint">Сессия не истекает — повторный вход понадобится, только если очистить данные сайта в браузере.</p>
+  </form>
+</div>
 <div class="wrap">
   <header class="top">
     <div class="logo">
       <div class="logo-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7.5" width="12" height="13" rx="2.5"/><path d="M8.5 4.5h8a3.5 3.5 0 0 1 3.5 3.5v9.5"/></svg></div>
       <div>
-        <div class="logo-name">LinguaCards</div>
-        <div class="logo-sub">тренажёр слов · автоперевод · самопроверка</div>
+        <div class="logo-name">Арсенов переводчик</div>
+        <div class="logo-sub">карточки слов · автоперевод · самопроверка</div>
       </div>
     </div>
     <div class="stats">
       <div class="stat-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><b id="statWords">0</b><span>слов</span></div>
       <div class="stat-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><b id="statPts">0</b><span>очков</span></div>
+      <div class="sync-chip" id="syncChip"><span class="sync-dot" id="syncDot"></span><span id="syncText">облако</span></div>
     </div>
     <div class="lang-wrap">
       <select id="langSel" title="Какой язык учим">
@@ -336,8 +375,9 @@ kbd{font:600 10.5px 'Inter',sans-serif;background:rgba(255,255,255,.1);border:1p
       <button class="tool-btn" id="btnImport"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Импорт</button>
       <input type="file" id="fileImport" accept=".json,application/json" hidden>
       <button class="tool-btn" id="btnClear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg><span>Очистить всё</span></button>
+      <button class="tool-btn" id="btnLogout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Выйти</span></button>
     </div>
-    <div class="api-note">Автоперевод работает на бесплатных сервисах и сам выбирает рабочий: Google Translate → MyMemory → Lingva.<br>Все слова хранятся локально в твоём браузере — делай экспорт, чтобы не потерять прогресс.</div>
+    <div class="api-note">Автоперевод работает на бесплатных сервисах и сам выбирает рабочий: Google Translate → MyMemory → Lingva.<br>Слова и прогресс автоматически синхронизируются с личным облаком — на всех устройствах одинаково. Экспорт оставь как резервную копию.</div>
   </section>
 </div>
 <div id="toasts"></div>
@@ -352,7 +392,9 @@ function detectLang(t){return /[а-яА-ЯёЁ]/.test(t)?'ru':state.settings.lan
 function langPair(text){const sl=detectLang(text);return [sl,sl==='ru'?state.settings.lang:'ru'];}
 
 /* ================= state ================= */
-const LS_KEY='linguaCards.v1';
+const LS_KEY='arsenov.v1',LS_KEY_OLD='linguaCards.v1',AUTH_KEY='arsenov.auth.v1';
+const CLOUD_URL='https://textdb.dev/api/data/1888e667af300a37a39e340c57b5cd7c';
+function authed(){try{return localStorage.getItem(AUTH_KEY)==='1';}catch(e){return false;}}
 function uid(){return 'w_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);}
 function clampScore(v){v=+v;if(!isFinite(v))return 0;return Math.max(-999,Math.min(999,Math.round(v)));}
 function sanitizeWord(w){
@@ -360,26 +402,34 @@ function sanitizeWord(w){
   const en=String(w.en==null?'':w.en).trim().slice(0,300);
   const ru=String(w.ru==null?'':w.ru).trim().slice(0,300);
   if(!en||!ru)return null;
+  const added=Math.round(+w.added)||Date.now();
   return {id:String(w.id||uid()),en:en,ru:ru,lang:(w.lang&&LANGS[w.lang])?w.lang:'en',score:clampScore(w.score),
     wrong:Math.max(0,Math.round(+w.wrong||0)),right:Math.max(0,Math.round(+w.right||0)),
-    added:Math.round(+w.added)||Date.now()};
+    added:added,md:Math.round(+w.md)||added};
 }
 let state=loadState();
 function loadState(){
   try{
-    const raw=localStorage.getItem(LS_KEY);
+    let raw=localStorage.getItem(LS_KEY);
+    if(!raw){raw=localStorage.getItem(LS_KEY_OLD);if(raw){try{localStorage.removeItem(LS_KEY_OLD);}catch(e){}}}
     if(raw){
       const d=JSON.parse(raw);
       let dir=(d.settings&&d.settings.dir)||'fwd';
       if(dir==='en')dir='fwd';else if(dir==='ru')dir='rev';
       if(['fwd','rev','mix'].indexOf(dir)<0)dir='fwd';
       const lang=(d.settings&&['en','de','fr'].indexOf(d.settings.lang)>=0)?d.settings.lang:'en';
-      return {words:Array.isArray(d.words)?d.words.map(sanitizeWord).filter(Boolean):[],settings:{dir:dir,lang:lang}};
+      return {words:Array.isArray(d.words)?d.words.map(sanitizeWord).filter(Boolean):[],
+        tomb:Array.isArray(d.tomb)?d.tomb.filter(function(t){return t&&t.id;}).map(function(t){return {id:String(t.id),ts:Math.round(+t.ts)||0};}):[],
+        settings:{dir:dir,lang:lang},updatedAt:Math.round(+d.updatedAt)||0};
     }
   }catch(e){}
-  return {words:[],settings:{dir:'fwd',lang:'en'}};
+  return {words:[],tomb:[],settings:{dir:'fwd',lang:'en'},updatedAt:0};
 }
-function saveState(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}
+function saveState(){
+  state.updatedAt=Date.now();
+  try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}
+  Sync.push();
+}
 function poolWords(){return state.words.filter(function(w){return (w.lang||'en')===state.settings.lang;});}
 
 /* ================= translation ================= */
@@ -565,12 +615,13 @@ function addWord(){
   const existing=state.words.find(function(w){return w.en.toLowerCase()===sLow||w.ru.toLowerCase()===sLow;});
   if(existing){
     if(sl==='ru')existing.en=tr;else existing.ru=tr;
+    existing.md=Date.now();
     saveState();renderList();renderStats();
     toast('Обновили перевод: «'+(sl==='ru'?existing.en:existing.ru)+'»','ok');
     clearForm();return;
   }
-  const w=sl==='ru'?{id:uid(),en:tr,ru:src,lang:state.settings.lang,score:0,wrong:0,right:0,added:Date.now()}
-                   :{id:uid(),en:src,ru:tr,lang:state.settings.lang,score:0,wrong:0,right:0,added:Date.now()};
+  const w=sl==='ru'?{id:uid(),en:tr,ru:src,lang:state.settings.lang,score:0,wrong:0,right:0,added:Date.now(),md:Date.now()}
+                   :{id:uid(),en:src,ru:tr,lang:state.settings.lang,score:0,wrong:0,right:0,added:Date.now(),md:Date.now()};
   state.words.push(w);
   saveState();renderList();renderStats();
   forceShowCard(w);
@@ -644,11 +695,15 @@ function deleteWord(id){
   const idx=state.words.findIndex(function(w){return w.id===id;});
   if(idx<0)return;
   const w=state.words.splice(idx,1)[0];
+  state.tomb.push({id:id,ts:Date.now()});
+  if(state.tomb.length>400)state.tomb=state.tomb.slice(-400);
   saveState();renderList();renderStats();
   if(current&&current.id===id&&currentTab==='train')nextCard();
   toast('Удалено: '+w.en,'','Вернуть',function(){
     const at=Math.min(idx,state.words.length);
+    w.md=Date.now();
     state.words.splice(at,0,w);
+    state.tomb=state.tomb.filter(function(t){return t.id!==id;});
     saveState();renderList();renderStats();
     if(currentTab==='train'&&state.words.length===1)nextCard();
   });
@@ -786,6 +841,7 @@ function answer(ok){
   if(!w){nextCard();return;}
   w.score+=ok?1:-1;
   if(ok)w.right++;else w.wrong++;
+  w.md=Date.now();
   saveState();renderStats();updateScoreBadge();renderList();
   if(ok)session.known++;else session.unknown++;
   renderSession();
@@ -847,11 +903,11 @@ if(window.matchMedia('(pointer:fine)').matches&&!window.matchMedia('(prefers-red
 
 /* ================= export / import ================= */
 $('btnExport').addEventListener('click',function(){
-  const data={app:'LinguaCards',version:1,exported:new Date().toISOString(),words:state.words};
+  const data={app:'ArsenovTranslator',version:1,exported:new Date().toISOString(),words:state.words};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
-  a.download='linguacards-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  a.download='arsenov-backup-'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(function(){URL.revokeObjectURL(a.href);},2000);
   toast('Резервная копия сохранена','ok');
@@ -896,8 +952,165 @@ $('btnClear').addEventListener('click',function(){
   }
   clearTimeout(clearT);clearArmed=false;
   b.classList.remove('armed');lbl.textContent='Очистить всё';
+  const now=Date.now();
+  state.words.forEach(function(w){state.tomb.push({id:w.id,ts:now});});
+  if(state.tomb.length>600)state.tomb=state.tomb.slice(-600);
   state.words=[];saveState();renderList();renderStats();nextCard();
   toast('Список очищен','ok');
+});
+
+/* ================= cloud sync ================= */
+/* Облако: textdb.dev (ключ зашит в файл, один и тот же на всех устройствах).
+   Мерж: слова LWW по md, tombstone-удаления, настройки LWW по updatedAt. */
+const Sync=(function(){
+  let timer=null,busy=false,queued=false,started=false,dirty=false;
+  function setStat(mode,txt){
+    const d=$('syncDot'),t=$('syncText'),c=$('syncChip');
+    if(d)d.className='sync-dot '+(mode||'');
+    if(t)t.textContent=txt;
+    if(c)c.title=txt;
+  }
+  function serialize(){
+    return JSON.stringify({v:1,users:{'1':'1'},store:{'1':{updatedAt:state.updatedAt||0,tomb:state.tomb||[],settings:state.settings,words:state.words}}});
+  }
+  function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}
+  async function write(txt){
+    const r=await fetch(CLOUD_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'value='+encodeURIComponent(txt),keepalive:true});
+    if(!r.ok)throw new Error('write '+r.status);
+  }
+  async function read(){
+    const r=await fetch(CLOUD_URL,{cache:'no-store'});
+    if(!r.ok)throw new Error('read '+r.status);
+    let t=await r.text();
+    if(t.slice(0,6)==='value=')t=t.slice(6);
+    return t.trim();
+  }
+  function mergeIn(rec){
+    if(!rec||!Array.isArray(rec.words))return;
+    const tomb={};
+    (state.tomb||[]).forEach(function(t){tomb[t.id]=Math.max(tomb[t.id]||0,t.ts);});
+    (rec.tomb||[]).forEach(function(t){if(t&&t.id)tomb[t.id]=Math.max(tomb[t.id]||0,Math.round(+t.ts)||0);});
+    const map={};
+    state.words.forEach(function(w){map[w.id]=w;});
+    rec.words.forEach(function(w){
+      const c=sanitizeWord(w);if(!c)return;
+      const o=map[c.id];
+      if(!o||((c.md||c.added||0)>=((o.md||o.added||0))))map[c.id]=c;
+    });
+    const out=[];
+    for(const id in map){const w=map[id];if(!(tomb[id]&&tomb[id]>=((w.md||w.added||0))))out.push(w);}
+    const nt=Object.keys(tomb).map(function(id){return {id:id,ts:tomb[id]};});
+    nt.sort(function(a,b){return a.ts-b.ts;});
+    state.tomb=nt.slice(-400);
+    state.words=out;
+    if((rec.updatedAt||0)>(state.updatedAt||0)&&rec.settings&&rec.settings.dir&&rec.settings.lang){
+      state.settings={dir:rec.settings.dir,lang:rec.settings.lang};
+    }
+    state.updatedAt=Math.max(state.updatedAt||0,Math.round(+rec.updatedAt)||0);
+  }
+  function renderAll(){
+    try{
+      Array.prototype.forEach.call($('dirSeg').children,function(b){b.classList.toggle('active',b.dataset.dir===state.settings.dir);});
+      $('langSel').value=state.settings.lang;
+      updateDirLabels();updateDirChip('');
+      renderStats();renderList();renderTrainVisibility();
+      const cw=currentWord();
+      if(cw)renderCard();else nextCard();
+    }catch(e){}
+  }
+  async function pull(){
+    setStat('busy','Синхронизация…');
+    try{
+      const txt=await read();
+      if(txt){
+        let ok=false;
+        try{
+          const d=JSON.parse(txt);
+          const rec=d&&d.store&&d.store['1'];
+          if(rec){mergeIn(rec);saveLocal();renderAll();}
+          ok=true;
+        }catch(pe){ok=false;}
+        await write(serialize());/* конвергенция: облако получает объединённое состояние */
+      }else{
+        await write(serialize());/* пустое облако — заливаем локальное */
+      }
+      setStat('ok','Синхронизировано · '+new Date().toLocaleTimeString());
+    }catch(e){setStat('err','Нет связи с облаком — работаю локально');}
+  }
+  async function pushNow(){
+    if(!started||!authed()||!dirty)return;
+    if(busy){queued=true;return;}
+    busy=true;setStat('busy','Синхронизация…');
+    dirty=false;
+    try{
+      /* перед отправкой забираем чужие изменения — не затираем их */
+      try{
+        const txt=await read();
+        if(txt){
+          const d=JSON.parse(txt);
+          const rec=d&&d.store&&d.store['1'];
+          if(rec){mergeIn(rec);saveLocal();renderAll();}
+        }
+      }catch(pe){}
+      await write(serialize());
+      busy=false;
+      setStat('ok','Синхронизировано · '+new Date().toLocaleTimeString());
+      if(queued){queued=false;setTimeout(pushNow,80);}
+    }catch(e){
+      busy=false;dirty=true;
+      setStat('err','Облако недоступно — сохраню позже');
+      if(queued)queued=false;
+      if(timer)clearTimeout(timer);
+      timer=setTimeout(pushNow,20000);
+    }
+  }
+  function push(){
+    if(!started||!authed())return;
+    dirty=true;
+    if(timer)clearTimeout(timer);
+    timer=setTimeout(pushNow,1200);
+  }
+  function flushNow(){
+    if(!started||!authed()||!dirty)return;
+    dirty=false;
+    if(timer){clearTimeout(timer);timer=null;}
+    write(serialize()).catch(function(){dirty=true;});
+  }
+  function start(){
+    if(started)return;started=true;
+    setStat('busy','Синхронизация…');
+    pull();
+    window.addEventListener('pagehide',flushNow);
+    window.addEventListener('beforeunload',flushNow);
+    document.addEventListener('visibilitychange',function(){
+      if(document.visibilityState==='visible')pull();else flushNow();
+    });
+  }
+  return {push:push,start:start};
+})();
+
+/* ================= auth ================= */
+function showAuth(){
+  $('authOverlay').style.display='flex';
+  setTimeout(function(){try{$('authLogin').focus();}catch(e){}},120);
+}
+$('authForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  const l=$('authLogin').value.trim(),p=$('authPass').value;
+  if(l==='1'&&p==='1'){
+    try{localStorage.setItem(AUTH_KEY,'1');}catch(err){}
+    $('authErr').textContent='';
+    $('authOverlay').style.display='none';
+    toast('Вход выполнен — синхронизирую облако…','ok');
+    Sync.start();
+  }else{
+    $('authErr').textContent='Неверный логин или пароль';
+    const c=$('authForm');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');
+  }
+});
+$('btnLogout').addEventListener('click',function(){
+  try{localStorage.removeItem(AUTH_KEY);}catch(e){}
+  location.reload();
 });
 
 /* ================= init ================= */
@@ -909,6 +1122,8 @@ $('btnClear').addEventListener('click',function(){
   updateDirLabels();updateDirChip('');
   renderStats();renderSession();renderList();
   nextCard();
+  if(authed())Sync.start();
+  else showAuth();
 })();
 </script>
 </body>
