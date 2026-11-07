@@ -518,7 +518,7 @@ body.reading{overflow:hidden}
       <div class="add-title">Добавить книгу</div>
       <div class="add-sub">TXT · FB2 · EPUB · PDF · HTML или ZIP с FB2 внутри. Русские книги переводим на изучаемый язык, иностранные — на русский. Книги, словарь и позиция чтения синхронизируются через облако — библиотека одна на всех устройствах.</div>
       <div class="book-drop" id="bookDrop" role="button" tabindex="0" aria-label="Добавить файл книги">
-        <input type="file" id="bookFile" accept=".txt,.text,.fb2,.pdf,.epub,.zip,.html,.htm,.xhtml" hidden>
+        <input type="file" id="bookFile" hidden>
         <div class="book-drop-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></div>
         <div class="book-drop-t">Перетащи файл книги сюда <span>или нажми для выбора</span></div>
         <div class="drop-status" id="bookDropStatus"></div>
@@ -630,12 +630,14 @@ function sanitizeBook(b){
   if(!b||typeof b!=='object')return null;
   const title=String(b.title==null?'':b.title).trim().slice(0,150);
   if(!title)return null;
-  return {id:String(b.id||('b_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8))),
+  const o={id:String(b.id||('b_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8))),
     title:title,author:String(b.author==null?'':b.author).trim().slice(0,100),
     lang:(b.lang&&BOOK_LANGS[b.lang])?b.lang:'en',
     fmt:String(b.fmt||'txt').toLowerCase().slice(0,6),
     chars:Math.max(0,Math.round(+b.chars||0)),
     added:Math.round(+b.added)||Date.now(),md:Math.round(+b.md)||Date.now()};
+  if(b.cl==='t')o.cl='t'; /* текст выгружен в облако textdb */
+  return o;
 }
 let state=loadState();
 function loadState(){
@@ -1385,39 +1387,77 @@ function svgIcon(inner,size){
   if(size)s.setAttribute('style','width:'+size+'px;height:'+size+'px;flex-shrink:0');
   s.innerHTML=inner;return s;
 }
-/* ---------- IndexedDB: полные тексты книг (локально, в этом браузере) ---------- */
+/* ---------- IndexedDB: полные тексты книг (локально, в этом браузере) ----------
+   На iPhone (Safari, приватный режим) IndexedDB может виснуть или запрещаться,
+   поэтому каждая операция под таймаутом, а при сбое хранилище помечается сломанным
+   и книги работают через память сессии + облако сервера. */
 const IDB_NAME='arsenov-books';
-let idbDbP=null;
+let idbDbP=null,idbBroken=false;
 function idbOpen(){
+  if(idbBroken)return Promise.reject(new Error('IndexedDB недоступен'));
   if(idbDbP)return idbDbP;
   idbDbP=new Promise(function(res,rej){
-    if(!window.indexedDB){rej(new Error('IndexedDB недоступен'));return;}
+    if(!window.indexedDB){idbBroken=true;rej(new Error('IndexedDB недоступен'));return;}
+    let done=false;
+    const t=setTimeout(function(){if(done)return;done=true;idbDbP=null;idbBroken=true;rej(new Error('idb timeout'));},10000);
     const rq=indexedDB.open(IDB_NAME,1);
     rq.onupgradeneeded=function(){const db=rq.result;if(!db.objectStoreNames.contains('books'))db.createObjectStore('books',{keyPath:'id'});};
-    rq.onsuccess=function(){res(rq.result);};
-    rq.onerror=function(){idbDbP=null;rej(rq.error||new Error('ошибка IndexedDB'));};
+    rq.onsuccess=function(){if(done)return;done=true;clearTimeout(t);res(rq.result);};
+    rq.onerror=function(){if(done)return;done=true;clearTimeout(t);idbDbP=null;rej(rq.error||new Error('ошибка IndexedDB'));};
   });
   return idbDbP;
 }
 function idbReq(rq){
-  return new Promise(function(res,rej){rq.onsuccess=function(){res(rq.result);};rq.onerror=function(){rej(rq.error);};});
+  return new Promise(function(res,rej){
+    let done=false;
+    const t=setTimeout(function(){if(done)return;done=true;idbBroken=true;rej(new Error('idb timeout'));},10000);
+    rq.onsuccess=function(){if(done)return;done=true;clearTimeout(t);res(rq.result);};
+    rq.onerror=function(){if(done)return;done=true;clearTimeout(t);rej(rq.error);};
+  });
 }
 async function idbPut(rec){const db=await idbOpen();return idbReq(db.transaction('books','readwrite').objectStore('books').put(rec));}
 async function idbGet(id){try{const db=await idbOpen();return await idbReq(db.transaction('books','readonly').objectStore('books').get(id));}catch(e){return null;}}
 async function idbDel(id){try{const db=await idbOpen();return await idbReq(db.transaction('books','readwrite').objectStore('books').delete(id));}catch(e){}}
 async function idbKeys(){try{const db=await idbOpen();return await idbReq(db.transaction('books','readonly').objectStore('books').getAllKeys());}catch(e){return [];}}
-/* ---------- облако книг: файлы хранятся на сервере, библиотека одна на всех устройствах ----------
-   Сервер этого же приложения даёт /api/books. Локальная копия в IndexedDB остаётся как кэш,
-   поэтому на другом устройстве книга просто скачивается при первом открытии. */
+/* Память сессии — страховка, если IndexedDB недоступен (приватный режим Safari):
+   текст книги живёт, пока открыта вкладка, и главное уходит в облако сервера,
+   поэтому книга всё равно появляется на всех устройствах. */
+const BOOK_MEM=new Map();
+function memPut(id,paras){
+  try{
+    if(!id||!Array.isArray(paras)||!paras.length)return;
+    BOOK_MEM.delete(id);BOOK_MEM.set(id,paras);
+    while(BOOK_MEM.size>8)BOOK_MEM.delete(BOOK_MEM.keys().next().value);
+  }catch(e){}
+}
+function memGet(id){const p=BOOK_MEM.get(id);return (p&&p.length)?p:null;}
+/* ---------- облако книг: тексты лежат в textdb.dev — том же облаке, что и словарь ----------
+   Работает с любого хостинга (в том числе GitHub Pages), где нет своего /api.
+   Каждая книга — свой документ: CLOUD_URL + '-book-' + id.
+   Тело сжимается gzip и кодируется в base64url (флаг z), большие книги режутся
+   на части по ~600 КБ (лимит textdb ~1 МБ) с манифестом {m:1,z,n}.
+   Факт выгрузки помечается в метаданных книги (cl:'t') и разносится обычной
+   синхронизацией состояния. Локальная копия в IndexedDB остаётся кэшем. */
 const BookCloud=(function(){
-  const API='/api/books',LIST_EVERY=15000;
-  let avail=false;          /* сервер отвечает */
-  let ids=new Set();        /* id книг, которые лежат в облаке */
+  const CHUNK=600000,CHUNK_RAW=400000;
+  /* fetch с таймаутом: на мобильном интернете запрос может висеть вечно */
+  function fetchT(url,opts,ms){
+    return new Promise(function(res,rej){
+      const ctl=new AbortController();
+      const t=setTimeout(function(){ctl.abort();rej(new Error('timeout'));},ms||15000);
+      fetch(url,Object.assign({},opts,{signal:ctl.signal}))
+        .then(function(r){clearTimeout(t);res(r);})
+        .catch(function(e){clearTimeout(t);rej(e);});
+    });
+  }
+  function bookKey(id){return CLOUD_URL+'-book-'+encodeURIComponent(id);}
+  let avail=true;           /* textdb — то же облако, что и словарь */
+  let ids=new Set();        /* id книг, выгруженных в облако (cl='t') */
   let lastList=0,listP=null;
   let pulled=false;         /* textdb-синхронизация уже выполнялась — можно выгружать локальные книги */
   let uploadQueue=[],uploadBusy=false,curJob=null;
   function tombstoned(id){return (state.bookTomb||[]).some(function(t){return t.id===id;});}
-  /* принимаем удаление книги: локальный tombstone + вычистка + попытка вернуть его в облако словаря */
+  /* принимаем удаление книги: локальный tombstone + вычистка */
   function tombstoneLocally(id){
     state.books=(state.books||[]).filter(function(b){return b.id!==id;});
     state.bookTomb=(state.bookTomb||[]).filter(function(t){return t.id!==id;});
@@ -1427,44 +1467,34 @@ const BookCloud=(function(){
     try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}
     Sync.push();
     idbDel(id);
+    try{BOOK_MEM.delete(id);}catch(e){}
+  }
+  function refreshIds(){
+    const fresh=new Set();
+    (state.books||[]).forEach(function(b){if(b&&b.cl==='t')fresh.add(b.id);});
+    let changed=fresh.size!==ids.size;
+    if(!changed){for(const x of fresh){if(!ids.has(x)){changed=true;break;}}}
+    if(!changed){for(const x of ids){if(!fresh.has(x)){changed=true;break;}}}
+    ids=fresh;lastList=Date.now();
+    return changed;
+  }
+  function ensureFresh(){
+    /* deriving идёт по локальному состоянию — без сети, дроссель не нужен:
+      после каждого pull/merge метаданные (cl) пересчитываются сразу */
+    refreshIds();
+    ensureUploaded();
   }
   function listNow(){
     if(listP)return listP;
     listP=(async function(){
       try{
-        const r=await fetch(API,{cache:'no-store'});
-        if(!r.ok)throw new Error('HTTP '+r.status);
-        const d=await r.json();
-        if(!d||!d.ok||!Array.isArray(d.books))throw new Error('bad');
-        const fresh=new Set(d.books.map(function(b){return b.id;}));
-        const changed=fresh.size!==ids.size||d.books.some(function(b){return !ids.has(b.id);})||Array.from(ids).some(function(id){return !fresh.has(id);});
-        avail=true;lastList=Date.now();ids=fresh;
-        /* самолечение: сервер знает книги, которых нет в локальном состоянии (например, textdb недоступен) */
-        let healed=0;
-        d.books.forEach(function(sb){
-          if((state.books||[]).some(function(b){return b.id===sb.id;}))return;
-          if(tombstoned(sb.id)){remove(sb.id);return;}
-          const b=sanitizeBook({id:sb.id,title:sb.title,author:sb.author,lang:sb.lang,fmt:sb.fmt,chars:sb.chars,added:sb.createdAt,md:sb.updatedAt});
-          if(b){state.books.push(b);healed++;}
-        });
-        /* сервер знает об удалениях, о которых мы ещё не слышали */
-        let healedDel=0;
-        (d.deleted||[]).forEach(function(did){
-          if(!(state.books||[]).some(function(b){return b.id===did;}))return;
-          tombstoneLocally(did);healedDel++;
-        });
-        if(healed){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}Sync.push();}
+        const changed=refreshIds();
         ensureUploaded();
-        if(changed||healed||healedDel){try{renderLibrary();}catch(e){}}
-      }catch(e){avail=false;}
+        if(changed){try{renderLibrary();}catch(e){}}
+      }catch(e){}
       listP=null;
     })();
     return listP;
-  }
-  function ensureFresh(){
-    if(!authed())return;
-    if(Date.now()-lastList<LIST_EVERY){ensureUploaded();return;}
-    listNow();
   }
   async function gzip(bytes){
     if(typeof CompressionStream==='undefined')return null;
@@ -1473,24 +1503,62 @@ const BookCloud=(function(){
       return new Uint8Array(await new Response(st).arrayBuffer());
     }catch(e){return null;}
   }
-  async function upload(book,paras){
-    const payload=JSON.stringify({book:{id:book.id,title:book.title,author:book.author||'',lang:book.lang||'en',fmt:book.fmt||'txt',chars:Math.round(book.chars||0)},paras:paras});
-    const raw=new TextEncoder().encode(payload);
-    let body=raw,enc='';
-    const gz=await gzip(raw);
-    if(gz&&gz.length<raw.length){body=gz;enc='gzip';}
-    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','X-Content-Encoding':enc},body:body});
-    let d=null;try{d=await r.json();}catch(pe){d=null;}
-    if(r.status===409&&d&&d.deleted){const err=new Error('deleted');err.deleted=true;throw err;}
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'server');
-    ids.add(book.id);avail=true;
+  async function gunzip(bytes){
+    const st=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(st).text();
   }
-  function queueUpload(book,loud){
+  function b64uEnc(u8){
+    let s='';
+    for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));
+    return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function b64uDec(str){
+    let s=String(str).replace(/-/g,'+').replace(/_/g,'/');
+    while(s.length%4)s+='=';
+    const bin=atob(s);
+    const u8=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    return u8;
+  }
+  async function putText(url,body,ms){
+    const r=await fetchT(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:body},ms||60000);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r;
+  }
+  async function getText(url,ms){
+    const r=await fetchT(url,{cache:'no-store'},ms||60000);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    let t=await r.text();
+    if(t.slice(0,6)==='value=')t=t.slice(6);
+    return t.trim();
+  }
+  async function upload(book,paras){
+    const payload=JSON.stringify({paras:paras});
+    const raw=new TextEncoder().encode(payload);
+    let body=payload,z=0;
+    const gz=await gzip(raw);
+    if(gz&&gz.length<raw.length){body=b64uEnc(gz);z=1;}
+    const limit=z?CHUNK:CHUNK_RAW;
+    const n=Math.ceil(body.length/limit);
+    if(n>1){
+      for(let i=0;i<n;i++){
+        await putText(bookKey(book.id)+'-c'+i,body.slice(i*limit,(i+1)*limit),120000);
+      }
+      await putText(bookKey(book.id),JSON.stringify({m:1,z:z,n:n}),30000);
+    }else{
+      await putText(bookKey(book.id),body,120000);
+    }
+    ids.add(book.id);avail=true;
+    const sb=(state.books||[]).find(function(b){return b&&b.id===book.id;});
+    if(sb&&!sb.cl){sb.cl='t';sb.md=Date.now();saveState();}
+  }
+  function queueUpload(book,loud,paras){
     if(!book||!book.id)return;
     if(curJob&&curJob.book.id===book.id)return;
     if(uploadQueue.some(function(x){return x.book.id===book.id;}))return;
-    uploadQueue.push({book:book,loud:!!loud});
+    /* paras можно передать прямо из памяти — тогда выгрузка не зависит
+       от IndexedDB (приватный режим Safari на iPhone) */
+    uploadQueue.push({book:book,loud:!!loud,paras:paras||null});
     drainQueue();
   }
   async function drainQueue(){
@@ -1501,18 +1569,26 @@ const BookCloud=(function(){
       const job=uploadQueue.shift();
       curJob=job;
       try{
-        if(tombstoned(job.book.id))continue;
-        const rec=await idbGet(job.book.id);
-        if(!rec||!Array.isArray(rec.paras)||!rec.paras.length)continue;
-        await upload(job.book,rec.paras);
-        done++;if(!job.loud)quietDone++;
-        if(job.loud)toast('Книга в облаке — теперь она есть на всех устройствах','ok');
+        if(!tombstoned(job.book.id)){
+          let paras=job.paras;
+          if(!paras){
+            const rec=await idbGet(job.book.id);
+            if(rec&&Array.isArray(rec.paras)&&rec.paras.length)paras=rec.paras;
+          }
+          if(!paras)paras=memGet(job.book.id);
+          if(paras){
+            await upload(job.book,paras);
+            done++;if(!job.loud)quietDone++;
+            if(job.loud)toast('Книга в облаке — теперь она есть на всех устройствах','ok');
+          }
+        }
       }catch(e){
-        if(e&&e.deleted){tombstoneLocally(job.book.id);dels++;continue;}
-        if(job.loud)loudFail=job.book.title;
+        if(e&&e.deleted){tombstoneLocally(job.book.id);dels++;}
+        else if(job.loud)loudFail=job.book.title;
       }
       curJob=null;
     }
+    curJob=null;
     uploadBusy=false;
     if(done||dels){try{renderLibrary();}catch(e){}}
     if(quietDone&&done===quietDone&&!loudFail)toast('Книги синхронизированы с облаком: '+done,'ok');
@@ -1521,33 +1597,75 @@ const BookCloud=(function(){
   function ensureUploaded(){
     if(!pulled||!avail)return;
     (state.books||[]).forEach(function(b){
-      if(ids.has(b.id))return;
+      if(!b||!b.id)return;
+      if(b.cl==='t')return;
       if(tombstoned(b.id))return;
       queueUpload(b,false);
     });
   }
   async function download(id){
-    const r=await fetch(API+'/'+encodeURIComponent(id),{cache:'no-store'});
-    if(r.status===404)ids.delete(id);
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    if(!d||!d.ok||!d.book||!Array.isArray(d.book.paras)||!d.book.paras.length)throw new Error('bad');
-    try{await idbPut({id:id,paras:d.book.paras});}catch(e){}
+    const t=await getText(bookKey(id),120000);
+    if(!t){
+      ids.delete(id);
+      /* в облаке пусто: сбрасываем флаг, чтобы книга перезалилась с устройства,
+         где ещё жива локальная копия (лечение потери текста в textdb) */
+      const sb=(state.books||[]).find(function(b){return b&&b.id===id;});
+      if(sb&&sb.cl){delete sb.cl;sb.md=Date.now();saveState();}
+      throw new Error('404');
+    }
+    let body=null,z=0;
+    if(t.charAt(0)==='{'){
+      let j=null;try{j=JSON.parse(t);}catch(e){}
+      if(j&&j.m){
+        z=j.z||0;
+        const parts=[];
+        for(let i=0;i<(j.n||1);i++){
+          const c=await getText(bookKey(id)+'-c'+i,120000);
+          if(!c)throw new Error('bad');
+          parts.push(c);
+        }
+        body=parts.join('');
+      }else{body=t;}
+    }else{body=t;z=1;}
+    let paras=null;
+    try{
+      const txt=z?await gunzip(b64uDec(body)):body;
+      const j=JSON.parse(txt);
+      paras=j&&j.paras;
+    }catch(e){paras=null;}
+    if(!Array.isArray(paras)||!paras.length)throw new Error('bad');
+    try{await idbPut({id:id,paras:paras});}catch(e){}
+    memPut(id,paras);
     ids.add(id);avail=true;
-    return {id:id,paras:d.book.paras};
+    return {id:id,paras:paras};
   }
   async function remove(id){
+    /* затираем документ книги и его части (textdb: пустое значение = пусто) */
     try{
-      const r=await fetch(API+'/'+encodeURIComponent(id),{method:'DELETE'});
-      ids.delete(id);
-      return r.ok;
-    }catch(e){return false;}
+      const t=await getText(bookKey(id),15000);
+      if(t&&t.charAt(0)==='{'){
+        let j=null;try{j=JSON.parse(t);}catch(e){}
+        if(j&&j.m){
+          for(let i=0;i<(j.n||1);i++){try{await putText(bookKey(id)+'-c'+i,'',15000);}catch(e){}}
+        }
+      }
+    }catch(e){}
+    try{await putText(bookKey(id),'',15000);}catch(e){}
+    ids.delete(id);
+    return true;
   }
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'&&authed())ensureFresh();});
+  /* прямая выгрузка без очереди и без IndexedDB — для случая, когда
+     хранилище браузера недоступно и облако — единственное место хранения книги */
+  async function uploadNow(book,paras){
+    const r=await upload(book,paras);
+    memPut(book.id,paras);
+    return r;
+  }
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')ensureFresh();});
   return {
     has:function(id){return ids.has(id);},
     isAvail:function(){return avail;},
-    listNow:listNow,ensureFresh:ensureFresh,queueUpload:queueUpload,download:download,remove:remove,
+    listNow:listNow,ensureFresh:ensureFresh,queueUpload:queueUpload,uploadNow:uploadNow,download:download,remove:remove,
     markPulled:function(){pulled=true;ensureUploaded();}
   };
 })();
@@ -1557,9 +1675,13 @@ function loadScript(src){
   if(scriptCache[src])return scriptCache[src];
   scriptCache[src]=new Promise(function(res,rej){
     const s=document.createElement('script');
+    let done=false;
+    /* таймаут: если CDN молчит (слабый интернет на телефоне), не вешаем
+       импорт книг навсегда — иначе флаг importing блокирует все следующие файлы */
+    const t=setTimeout(function(){if(done)return;done=true;delete scriptCache[src];try{document.head.removeChild(s);}catch(e){}rej(new Error('cdn'));},25000);
     s.src=src;s.async=true;
-    s.onload=function(){res();};
-    s.onerror=function(){delete scriptCache[src];rej(new Error('cdn'));};
+    s.onload=function(){if(done)return;done=true;clearTimeout(t);res();};
+    s.onerror=function(){if(done)return;done=true;clearTimeout(t);delete scriptCache[src];rej(new Error('cdn'));};
     document.head.appendChild(s);
   });
   return scriptCache[src];
@@ -1846,34 +1968,60 @@ function setImportStatus(mode,txt){
   if(mode==='ok'||mode==='err')importStatusT=setTimeout(function(){box.className='drop-status';box.textContent='';},6000);
 }
 async function importBookFile(file){
-  if(importing)return;
+  if(importing){toast('Ещё обрабатываю предыдущий файл — подожди','warn');return;}
   importing=true;
   setImportStatus('loading','Читаю файл «'+file.name+'»…');
   try{
-    const ext=(file.name.split('.').pop()||'').toLowerCase();
+    const buf=await file.arrayBuffer();
     let paras=[],title='',author='';
-    if(ext==='pdf'){
-      const res=await pdfToParas(await file.arrayBuffer(),function(p,t){setImportStatus('loading','Распознаю PDF: страница '+p+' из '+t+'…');});
+    /* тип определяем по содержимому: на iPhone файл может прийти без расширения
+       («111») или с чужим — имени не доверяем */
+    const u8=new Uint8Array(buf);
+    let head='';
+    const hn=Math.min(2048,u8.length);
+    for(let i=0;i<hn;i++)head+=String.fromCharCode(u8[i]);
+    const lowHead=head.toLowerCase();
+    let kind='txt';
+    if(u8.length>=4&&head.substring(0,4)==='%PDF')kind='pdf';
+    else if(u8.length>=4&&u8[0]===0x50&&u8[1]===0x4B&&(u8[2]===3||u8[2]===5||u8[2]===7))kind='pk';
+    else if(lowHead.indexOf('<fictionbook')>=0)kind='fb2';
+    else if(lowHead.indexOf('<html')>=0||lowHead.indexOf('<!doctype html')>=0)kind='html';
+    else if(lowHead.indexOf('<?xml')>=0)kind='fb2';
+    if((u8.length>1&&((u8[0]===0xFF&&u8[1]===0xFE)||(u8[0]===0xFE&&u8[1]===0xFF)))){
+      try{
+        const dec=new TextDecoder(u8[0]===0xFF?'utf-16le':'utf-16be',{fatal:false});
+        const sample=dec.decode(u8.subarray(0,Math.min(8192,u8.length))).toLowerCase();
+        if(sample.indexOf('<fictionbook')>=0||sample.indexOf('<?xml')>=0)kind='fb2';
+        else if(sample.indexOf('<html')>=0||sample.indexOf('<!doctype html')>=0)kind='html';
+      }catch(e){}
+    }
+    if(kind==='pdf'){
+      const res=await pdfToParas(buf,function(p,t){setImportStatus('loading','Распознаю PDF: страница '+p+' из '+t+'…');});
       paras=res.paras;title=res.title;author=res.author;
-    }else if(ext==='epub'){
-      const res=await epubToParas(await file.arrayBuffer(),function(d,t){setImportStatus('loading','Читаю EPUB: файл '+d+' из '+t+'…');});
-      paras=res.paras;title=res.meta.title;author=res.meta.author;
-    }else if(ext==='zip'){
-      const z=await zipToFb2(await file.arrayBuffer());
-      if(/\.(fb2|xml)$/i.test(z.name)){
-        const r=fb2Parse(z.buf);
-        paras=r.paras;title=r.meta.title;author=r.meta.author;
+    }else if(kind==='pk'){
+      await loadScript(CDN.zip);
+      const zc=await window.JSZip.loadAsync(buf);
+      if(zc.file('META-INF/container.xml')){
+        const res=await epubToParas(buf,function(d,t){setImportStatus('loading','Читаю EPUB: файл '+d+' из '+t+'…');});
+        paras=res.paras;title=res.meta.title;author=res.meta.author;kind='epub';
       }else{
-        paras=txtToParas(bufToStr(z.buf));
+        const z=await zipToFb2(buf);
+        if(/\.(fb2|xml)$/i.test(z.name)){
+          const r=fb2Parse(z.buf);
+          paras=r.paras;title=r.meta.title;author=r.meta.author;
+        }else{
+          paras=txtToParas(bufToStr(z.buf));
+        }
+        if(!title)title=z.name.replace(/\.[^.]+$/,'');
+        kind='fb2';
       }
-      if(!title)title=z.name.replace(/\.[^.]+$/,'');
-    }else if(ext==='fb2'||ext==='xml'){
-      const r=fb2Parse(await file.arrayBuffer());
+    }else if(kind==='fb2'){
+      const r=fb2Parse(buf);
       paras=r.paras;title=r.meta.title;author=r.meta.author;
-    }else if(ext==='html'||ext==='htm'||ext==='xhtml'){
-      paras=domToParas(bufToStr(await file.arrayBuffer()));
+    }else if(kind==='html'){
+      paras=domToParas(bufToStr(buf));
     }else{
-      paras=txtToParas(bufToStr(await file.arrayBuffer()));
+      paras=txtToParas(bufToStr(buf));
     }
     if(!paras.length)throw new Error('в файле не нашлось текста');
     const sample=paras.slice(0,120).map(function(p){return p.x;}).join(' ');
@@ -1881,13 +2029,31 @@ async function importBookFile(file){
     if(!title)title=file.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim();
     const totalChars=paras.reduce(function(a,p){return a+p.x.length;},0);
     if(totalChars>2500000)toast('Книга очень большая — листание и переводы могут работать медленнее','warn');
-    const book=sanitizeBook({title:title,author:author,lang:lang,fmt:ext,chars:totalChars,added:Date.now(),md:Date.now()});
-    try{await idbPut({id:book.id,paras:paras});}catch(e){throw new Error('не удалось сохранить книгу в этом браузере');}
-    state.books.unshift(book);
-    saveState();renderStats();renderLibrary();
-    BookCloud.queueUpload(book,true);
-    setImportStatus('ok','Добавлено: '+book.title);
-    toast('Книга в библиотеке: '+book.title,'ok');
+    const book=sanitizeBook({title:title,author:author,lang:lang,fmt:kind,chars:totalChars,added:Date.now(),md:Date.now()});
+    memPut(book.id,paras);
+    let idbSaved=true;
+    try{await idbPut({id:book.id,paras:paras});}catch(e){idbSaved=false;}
+    if(idbSaved){
+      state.books.unshift(book);
+      saveState();renderStats();renderLibrary();
+      BookCloud.queueUpload(book,true,paras);
+      setImportStatus('ok','Добавлено: '+book.title);
+      toast('Книга в библиотеке: '+book.title,'ok');
+    }else{
+      /* Хранилище браузера недоступно (приватный режим Safari на iPhone):
+         книга обязана уйти в облако — иначе она нигде не сохранится. */
+      setImportStatus('loading','Сохраняю книгу в облако…');
+      try{
+        await BookCloud.uploadNow(book,paras);
+      }catch(err){
+        if(err&&err.deleted)throw new Error('книга была удалена на другом устройстве');
+        throw new Error('этот браузер не даёт сохранить файл (приватный режим?) и не удалось загрузить в облако — проверь интернет');
+      }
+      state.books.unshift(book);
+      saveState();renderStats();renderLibrary();
+      setImportStatus('ok','Добавлено: '+book.title);
+      toast('Книга в облаке — теперь она есть на всех устройствах','ok');
+    }
     importing=false;
     openBook(book.id);
   }catch(err){
@@ -1939,6 +2105,7 @@ async function renderLibrary(){
   if(!grid)return;
   let local=new Set();
   try{local=new Set(await idbKeys());}catch(e){}
+  BOOK_MEM.forEach(function(v,k){local.add(k);});
   BookCloud.ensureFresh();
   try{ /* подчищаем локальные файлы книг, которых больше нет в библиотеке */
     const keep=new Set((state.books||[]).map(function(b){return b.id;}));
@@ -1998,10 +2165,7 @@ async function renderLibrary(){
     if(b.author){const ca=el('div','bc-author');ca.textContent=b.author;cov.appendChild(ca);}
     if(!hasLocal&&hasCloud){const nf=el('div','bc-nofile cloud');nf.textContent='в облаке · скачать';cov.appendChild(nf);}
     else if(!hasAny){const nf=el('div','bc-nofile');nf.textContent='файл на другом устройстве';cov.appendChild(nf);}
-    cov.addEventListener('click',function(){
-      if(hasAny)openBook(b.id);
-      else toast('Файл этой книги есть только на устройстве, где её добавили','warn');
-    });
+    cov.addEventListener('click',function(){openBook(b.id);});
     card.appendChild(cov);
     const meta=el('div','book-meta');
     const nm=el('div','book-name');nm.textContent=b.title;nm.title=b.title;
@@ -2025,7 +2189,7 @@ async function renderLibrary(){
     rd.appendChild(svgIcon('<polygon points="5 3 19 12 5 21 5 3"/>'));
     rd.appendChild(document.createTextNode(pr?('Продолжить · '+Math.round(pr.p||0)+'%'):(hasCloud&&!hasLocal?'Скачать · читать':'Читать')));
     if(!hasLocal&&hasCloud){rd.title='Файл книги в облаке — при открытии скачается на это устройство';}
-    else if(!hasAny){rd.disabled=true;rd.title='Файл книги есть только на устройстве, где её добавили';}
+    else if(!hasAny){rd.title='Файла пока нет в облаке — попробую скачать при открытии';}
     rd.addEventListener('click',function(){openBook(b.id);});
     const del=el('button','book-del');
     del.title='Удалить книгу из библиотеки';
@@ -2055,6 +2219,7 @@ function deleteBook(id){
   state.bookTomb.push({id:id,ts:Date.now()});
   if(state.bookTomb.length>400)state.bookTomb=state.bookTomb.slice(-400);
   idbDel(id);
+  try{BOOK_MEM.delete(id);}catch(e){}
   BookCloud.remove(id);
   if(RD.book&&RD.book.id===id){
     RD.book=null;
@@ -2069,12 +2234,16 @@ function deleteBook(id){
 async function openBook(id){
   const meta=(state.books||[]).find(function(b){return b.id===id;});
   if(!meta){toast('Книга не найдена','err');return;}
-  let rec=await idbGet(id);
-  if(!rec||!Array.isArray(rec.paras)||!rec.paras.length){
+  let paras=memGet(id);
+  if(!paras){
+    const rec=await idbGet(id);
+    if(rec&&Array.isArray(rec.paras)&&rec.paras.length)paras=rec.paras;
+  }
+  if(!paras){
     if(!BookCloud.isAvail()){try{await BookCloud.listNow();}catch(e){}}
     if(BookCloud.isAvail()){
       toast('Загружаю книгу из облака…');
-      try{rec=await BookCloud.download(id);}
+      try{paras=(await BookCloud.download(id)).paras;}
       catch(err){
         const nf=err&&err.message&&err.message.indexOf('404')>=0;
         toast(nf?'Файл этой книги есть только на устройстве, где её добавили':'Не удалось скачать книгу из облака — проверь интернет',nf?'warn':'err');
@@ -2082,7 +2251,7 @@ async function openBook(id){
       }
       renderLibrary();
     }else{
-      toast('Файл этой книги есть только на устройстве, где её добавили','warn');
+      toast('Облако книг недоступно — проверь интернет и попробуй ещё раз','warn');
       return;
     }
   }
@@ -2099,7 +2268,7 @@ async function openBook(id){
   applyReaderPrefs();
   rTextEl.textContent='';
   const frag=document.createDocumentFragment();
-  rec.paras.forEach(function(p){
+  paras.forEach(function(p){
     const node=document.createElement(p.t==='h'?'h3':'p');
     node.textContent=p.x;
     RD.els.push(node);
